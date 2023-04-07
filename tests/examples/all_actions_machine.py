@@ -172,7 +172,7 @@ assert result == [
     "after_go_inline_2",
     "after_go_decor",
     "after_go",
-    "after_transition"
+    "after_transition",
 ]
 
 # %%

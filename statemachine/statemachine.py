@@ -2,6 +2,8 @@ from collections import deque
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Dict  # deprecated since 3.9: https://peps.python.org/pep-0585/
+from typing import List  # deprecated since 3.9: https://peps.python.org/pep-0585/
+from typing import Tuple  # deprecated since 3.9: https://peps.python.org/pep-0585/
 
 from .dispatcher import ObjectConfig
 from .dispatcher import resolver_factory
@@ -21,7 +23,7 @@ if TYPE_CHECKING:
     from .state import State
 
 
-EMPTY_RETURN_VALUES = (None, [])
+EMPTY_RETURN_VALUES: Tuple[None, List] = (None, [])
 """Values returned by callback wrappers, that will not be propagated."""
 
 
