@@ -8,7 +8,6 @@ from typing import Dict
 from .callbacks import CallbacksRegistry
 from .dispatcher import ObjectConfig
 from .dispatcher import resolver_factory
-from .event import Event
 from .event_data import EventData
 from .event_data import TriggerData
 from .exceptions import InvalidDefinition
@@ -17,7 +16,6 @@ from .exceptions import TransitionNotAllowed
 from .factory import StateMachineMetaclass
 from .i18n import _
 from .model import Model
-from .transition import Transition
 
 if TYPE_CHECKING:
     from .state import State
@@ -69,8 +67,6 @@ class StateMachine(metaclass=StateMachineMetaclass):
         self.state_field = state_field
         self.start_value = start_value
         self.allow_event_without_transition = allow_event_without_transition
-        self.__rtc = rtc
-        self.__processing: bool = False
         self._external_queue: deque = deque()
         self._callbacks_registry = CallbacksRegistry()
         self._states_for_instance: Dict["State", "State"] = {}
@@ -78,10 +74,6 @@ class StateMachine(metaclass=StateMachineMetaclass):
         assert hasattr(self, "_abstract")
         if self._abstract:
             raise InvalidDefinition(_("There are no states or transitions."))
-
-        self._initial_transition = Transition(None, self._get_initial_state(), event="__initial__")
-        self._setup()
-        self._activate_initial_state()
 
     def __init_subclass__(cls, strict_states: bool = False):
         cls._strict_states = strict_states
@@ -149,12 +141,6 @@ class StateMachine(metaclass=StateMachineMetaclass):
             "send",
         } | {s.id for s in self.states}
 
-    def _visit_states_and_transitions(self, visitor):
-        for state in self.states:
-            visitor(state)
-            for transition in state.transitions:
-                visitor(transition)
-
     def _setup(self):
         machine = ObjectConfig.from_obj(self, skip_attrs=self._get_protected_attrs())
         model = ObjectConfig.from_obj(self.model, skip_attrs={self.state_field})
@@ -203,17 +189,6 @@ class StateMachine(metaclass=StateMachineMetaclass):
         self._visit_states_and_transitions(visitor)
         return self
 
-    def _repr_html_(self):
-        return f'<div class="statemachine">{self._repr_svg_()}</div>'
-
-    def _repr_svg_(self):
-        return self._graph().create_svg().decode()
-
-    def _graph(self):
-        from .contrib.diagram import DotGraphMachine
-
-        return DotGraphMachine(self).get_graph()
-
     @property
     def current_state_value(self):
         """Get/Set the current :ref:`state` value.
@@ -247,74 +222,14 @@ class StateMachine(metaclass=StateMachineMetaclass):
     @current_state.setter
     def current_state(self, value):
         self.current_state_value = value.value
+    
+    @current_state.setter
+    def current_state(self, value):
+        self.current_state_value = value.value
 
     @property
     def events(self):
         return self.__class__.events
-
-    @property
-    def allowed_events(self):
-        """List of the current allowed events."""
-        return [getattr(self, event) for event in self.current_state.transitions.unique_events]
-
-    def _process(self, trigger):
-        """Process event triggers.
-
-        The simplest implementation is the non-RTC (synchronous),
-        where the trigger will be run immediately and the result collected as the return.
-
-        .. note::
-
-            While processing the trigger, if others events are generated, they
-            will also be processed immediately, so a "nested" behavior happens.
-
-        If the machine is on ``rtc`` model (queued), the event is put on a queue, and only the
-        first event will have the result collected.
-
-        .. note::
-            While processing the queue items, if others events are generated, they
-            will be processed sequentially (and not nested).
-
-        """
-        if not self.__rtc:
-            # The machine is in "synchronous" mode
-            return trigger()
-
-        # The machine is in "queued" mode
-        # Add the trigger to queue and start processing in a loop.
-        self._external_queue.append(trigger)
-
-        # We make sure that only the first event enters the processing critical section,
-        # next events will only be put on the queue and processed by the same loop.
-        if self.__processing:
-            return
-
-        return self._processing_loop()
-
-    def _processing_loop(self):
-        """Execute the triggers in the queue in order until the queue is empty"""
-        self.__processing = True
-
-        # We will collect the first result as the processing result to keep backwards compatibility
-        # so we need to use a sentinel object instead of `None` because the first result may
-        # be also `None`, and on this case the `first_result` may be overridden by another result.
-        sentinel = object()
-        first_result = sentinel
-        try:
-            while self._external_queue:
-                trigger = self._external_queue.popleft()
-                try:
-                    result = trigger()
-                    if first_result is sentinel:
-                        first_result = result
-                except Exception:
-                    # Whe clear the queue as we don't have an expected behavior
-                    # and cannot keep processing
-                    self._external_queue.clear()
-                    raise
-        finally:
-            self.__processing = False
-        return first_result if first_result is not sentinel else None
 
     def _activate(self, event_data: EventData):
         transition = event_data.transition
@@ -351,13 +266,28 @@ class StateMachine(metaclass=StateMachineMetaclass):
 
         return result
 
-    def send(self, event, *args, **kwargs):
-        """Send an :ref:`Event` to the state machine.
+        
+    def transition_to(self, new_state_id):
+        new_state = self.states_map.get(new_state_id)
+        if not new_state:
+            raise InvalidStateValue(f"State '{new_state_id}' does not exist.")
 
-        .. seealso::
+        event_data = EventData(
+            trigger_data=TriggerData(
+                machine=self,
+                event=f"transition_to_{new_state}",
+            ),
+            transition=None,
+            state=self.current_state,
+            args=(),
+            kwargs={},
+        )
 
-            See: :ref:`triggering events`.
+        # Execute any 'exit' callbacks for the current state
+        self._callbacks_registry[self.current_state.exit].call(event_data)
 
-        """
-        event = Event(event)
-        return event.trigger(self, *args, **kwargs)
+        # Update the current state
+        self.current_state_value = new_state_id
+
+        # Execute any 'enter' callbacks for the new state
+        self._callbacks_registry[new_state.enter].call(event_data)

@@ -95,13 +95,17 @@ class State:
     def __init__(
         self,
         name: str = "",
+        description: str = "",
         value: Any = None,
         initial: bool = False,
         final: bool = False,
         enter: Any = None,
         exit: Any = None,
+        prompt: str = "",
+        next_states: list = None,
     ):
         self.name = name
+        self.description = description
         self.value = value
         self._initial = initial
         self._final = final
@@ -109,6 +113,9 @@ class State:
         self.transitions = TransitionList()
         self.enter = CallbackMetaList().add(enter)
         self.exit = CallbackMetaList().add(exit)
+        self.prompt = prompt
+        self.next_states = next_states if next_states is not None else []
+
 
     def __eq__(self, other):
         return isinstance(other, State) and self.name == other.name and self.id == other.id
@@ -182,6 +189,25 @@ class State:
 
         proxy.itself = proxy_to_itself
         return proxy
+    
+    @property
+    def prompt(self) -> str:
+        return self._prompt
+
+    @prompt.setter
+    def prompt(self, value: str):
+        self._prompt = value
+
+    @property
+    def next_states(self) -> list:
+        return self._next_states
+
+    @next_states.setter
+    def next_states(self, value: list):
+        # Ensure that each item in the list is a dict with 'name' and 'description' keys
+        if not all(isinstance(item, dict) and 'name' in item and 'description' in item for item in value):
+            raise ValueError("Each item in next_states must be a dict with 'name' and 'description' keys")
+        self._next_states = value
 
     @property
     def to(self):

@@ -20,13 +20,3 @@ class InvalidStateValue(InvalidDefinition):
 
 class AttrNotFound(InvalidDefinition):
     "There's no method or property with the given name"
-
-
-class TransitionNotAllowed(StateMachineError):
-    "Raised when there's no transition that can run from the current :ref:`state`."
-
-    def __init__(self, event, state):
-        self.event = event
-        self.state = state
-        msg = _("Can't {} when in {}.").format(self.event, self.state.name)
-        super().__init__(msg)
